@@ -1,3 +1,7 @@
+# Unreleased
+
+Foo Bar
+
 # Version 0.1.0 (2024-08-04)
 
 I am really happy to announce the **first** release of `patch-hub` :tada: :confetti_ball: :sparkles:
