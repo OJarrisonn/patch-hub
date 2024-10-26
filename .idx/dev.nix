@@ -26,7 +26,6 @@
     workspace = {
       onCreate = {
         rust = "rustup default stable";
-        first-build = "cargo build";
       };
     };
   };
