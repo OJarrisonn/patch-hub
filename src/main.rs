@@ -9,6 +9,7 @@ use logger::{LogLevel, Logger, LoggerActor};
 
 mod app;
 mod cli;
+mod config;
 mod handler;
 mod logger;
 mod ui;
