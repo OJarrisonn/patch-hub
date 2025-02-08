@@ -1,10 +1,11 @@
 use crate::{
     app::{screens::CurrentScreen, App},
+    config::ConfigActor,
     ui::popup::{help::HelpPopUpBuilder, PopUp},
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
-pub fn handle_edit_config(app: &mut App, key: KeyEvent) -> color_eyre::Result<()> {
+pub async fn handle_edit_config(app: &mut App, key: KeyEvent) -> color_eyre::Result<()> {
     if let Some(edit_config_state) = app.edit_config.as_mut() {
         match edit_config_state.is_editing() {
             true => match key.code {
@@ -31,8 +32,8 @@ pub fn handle_edit_config(app: &mut App, key: KeyEvent) -> color_eyre::Result<()
                     app.popup = Some(popup);
                 }
                 KeyCode::Esc | KeyCode::Char('q') => {
-                    app.consolidate_edit_config();
-                    app.config.save_patch_hub_config()?;
+                    app.consolidate_edit_config().await;
+                    app.config.save().await?;
                     app.reset_edit_config();
                     app.set_current_screen(CurrentScreen::MailingListSelection);
                 }

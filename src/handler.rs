@@ -11,6 +11,7 @@ use std::{
 
 use crate::{
     app::{screens::CurrentScreen, App},
+    config::{ConfigActor, USizeConfig},
     loading_screen,
     logger::{Logger, LoggerActor},
     ui::draw_ui,
@@ -46,16 +47,16 @@ where
     } else {
         match app.current_screen {
             CurrentScreen::MailingListSelection => {
-                return handle_mailing_list_selection(app, key, terminal);
+                return handle_mailing_list_selection(app, key, terminal).await;
             }
             CurrentScreen::BookmarkedPatchsets => {
                 return handle_bookmarked_patchsets(app, key, terminal).await;
             }
             CurrentScreen::PatchsetDetails => {
-                handle_patchset_details(app, key, &mut terminal)?;
+                handle_patchset_details(app, key, &mut terminal).await?;
             }
             CurrentScreen::EditConfig => {
-                handle_edit_config(app, key)?;
+                handle_edit_config(app, key).await?;
             }
             CurrentScreen::LatestPatchsets => {
                 return handle_latest_patchsets(app, key, terminal).await;
@@ -121,8 +122,9 @@ where
 
     loop {
         terminal = logic_handling(terminal, &mut app)?;
+        let page_size = app.config.usize(USizeConfig::PageSize).await;
 
-        terminal.draw(|f| draw_ui(f, &app))?;
+        terminal.draw(|f| draw_ui(f, &app, page_size))?;
 
         // *IMPORTANT*: Uncommenting the if below makes `patch-hub` not block
         // until an event is captured.  We should only do it when (if ever) we

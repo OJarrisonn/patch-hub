@@ -4,9 +4,10 @@ use std::{
     process::{Command, Stdio},
 };
 
+use actix::dev::MessageResponse;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Eq, PartialEq, MessageResponse)]
 pub enum PatchRenderer {
     #[default]
     #[serde(rename = "default")]
@@ -52,7 +53,7 @@ impl Display for PatchRenderer {
     }
 }
 
-pub fn render_patch_preview(raw: &str, renderer: &PatchRenderer) -> color_eyre::Result<String> {
+pub fn render_patch_preview(raw: &str, renderer: PatchRenderer) -> color_eyre::Result<String> {
     let text = match renderer {
         PatchRenderer::Default => Ok(raw.to_string()),
         PatchRenderer::Bat => bat_patch_renderer(raw),

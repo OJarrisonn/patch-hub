@@ -7,6 +7,7 @@ use ratatui::{prelude::Backend, Terminal};
 
 use crate::{
     app::App,
+    config::ConfigActor,
     logger::{Logger, LoggerActor},
     utils,
 };
@@ -35,7 +36,7 @@ impl Cli {
             if let Err(err) = utils::restore() {
                 return ControlFlow::Break(Err(eyre!(err)));
             }
-            match serde_json::to_string_pretty(&app.config) {
+            match serde_json::to_string_pretty(&app.config.cloned().await) {
                 Err(err) => return ControlFlow::Break(Err(eyre!(err))),
                 Ok(config) => println!("patch-hub configurations:\n{}", config),
             }

@@ -4,9 +4,10 @@ use std::{
     process::{Command, Stdio},
 };
 
+use actix::MessageResponse;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default, Eq, PartialEq, MessageResponse)]
 pub enum CoverRenderer {
     #[default]
     #[serde(rename = "default")]
@@ -42,7 +43,7 @@ impl Display for CoverRenderer {
     }
 }
 
-pub fn render_cover(raw: &str, renderer: &CoverRenderer) -> color_eyre::Result<String> {
+pub fn render_cover(raw: &str, renderer: CoverRenderer) -> color_eyre::Result<String> {
     let text = match renderer {
         CoverRenderer::Default => Ok(raw.to_string()),
         CoverRenderer::Bat => bat_cover_renderer(raw),

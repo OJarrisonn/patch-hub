@@ -1,7 +1,8 @@
-use crate::app::config::Config;
+use crate::config::{Config, ConfigActor, StringConfig};
 
 use super::CurrentScreen;
 use ::patch_hub::lore::{lore_api_client::BlockingLoreAPIClient, lore_session, patch::Patch};
+use actix::Addr;
 use color_eyre::eyre::bail;
 use patch_hub::lore::patch::Author;
 use ratatui::text::Text;
@@ -217,20 +218,19 @@ impl DetailsActions {
     /// # TODO:
     /// - Break down this function
     /// - Add unit tests
-    pub fn apply_patchset(&self, config: &Config) -> Result<String, String> {
+    pub async fn apply_patchset(&self, config: Addr<Config>) -> Result<String, String> {
         // 1. Check if target kernel tree is set
-        let kernel_tree_id = if let Some(target) = config.target_kernel_tree() {
+        let kernel_tree_id = if let Some(target) = config.target_kernel_tree().await {
             target
         } else {
             return Err("target kernel tree unset".to_string());
         };
 
         // 2. Check if target kernel tree exists
-        let kernel_tree = if let Some(tree) = config.get_kernel_tree(kernel_tree_id) {
-            tree
-        } else {
-            return Err(format!("invalid target kernel tree '{}'", kernel_tree_id));
-        };
+        let kernel_tree = config
+            .kernel_tree(kernel_tree_id)
+            .await
+            .map_err(|tree| format!("invalid target kernel tree '{}'", tree))?;
 
         // 3. Check if path to kernel tree is valid
         let kernel_tree_path = Path::new(kernel_tree.path());
@@ -316,7 +316,7 @@ impl DetailsActions {
             .unwrap();
         let target_branch_name = format!(
             "{}{}",
-            config.git_am_branch_prefix(),
+            config.string(StringConfig::GitAmBranchPrefix).await,
             chrono::Utc::now().format("%Y-%m-%d-%H-%M-%S")
         );
         let _ = Command::new("git")
@@ -335,9 +335,13 @@ impl DetailsActions {
             .arg(kernel_tree.path())
             .arg("am")
             .arg(&self.patchset_path);
-        config.git_am_options().split_whitespace().for_each(|opt| {
-            git_am_out.arg(opt);
-        });
+        config
+            .string(StringConfig::GitAmOptions)
+            .await
+            .split_whitespace()
+            .for_each(|opt| {
+                git_am_out.arg(opt);
+            });
         let git_am_out = git_am_out.output().unwrap();
         if !git_am_out.status.success() {
             let _ = Command::new("git")

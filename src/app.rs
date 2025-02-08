@@ -1,11 +1,11 @@
 use crate::{
+    config::{Config, ConfigActor, StringConfig, USizeConfig},
     logger::{Logger, LoggerActor},
     ui::popup::{info_popup::InfoPopUp, PopUp},
 };
 use actix::Addr;
 use ansi_to_tui::IntoText;
 use color_eyre::eyre::bail;
-use config::Config;
 use cover_renderer::render_cover;
 use patch_hub::lore::{
     lore_api_client::BlockingLoreAPIClient,
@@ -26,7 +26,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::utils;
 
-mod config;
 pub mod cover_renderer;
 pub mod patch_renderer;
 pub mod screens;
@@ -49,7 +48,7 @@ pub struct App {
     /// Database to track patchsets `Reviewed-by` state
     pub reviewed_patchsets: HashMap<String, HashSet<usize>>,
     /// Configurations of the app
-    pub config: Config,
+    pub config: Addr<Config>,
     /// Client to handle Lore API requests and responses
     pub lore_api_client: BlockingLoreAPIClient,
     pub popup: Option<Box<dyn PopUp>>,
@@ -58,27 +57,33 @@ pub struct App {
 
 impl App {
     /// Creates a new instance of `App`. It dynamically loads configurations
-    /// based on precedence (see [crate::app::Config::build]), app data
+    /// based on precedence (see [crate::config::Config::build]), app data
     /// (available mailing lists, bookmarked patchsets, reviewed patchsets), and
     /// initializes the Logger (see [crate::app::logging::Logger])
     ///
     /// # Returns
     ///
     /// `App` instance with loading configurations and app data.
-    pub fn new(logger: Addr<Logger>) -> App {
-        let config: Config = Config::build();
-        config.create_dirs();
+    pub async fn new(logger: Addr<Logger>, config: Addr<Config>) -> App {
+        logger
+            .error_on_error(config.mkdirs().await)
+            .await
+            .expect("Unable to create essential directories");
 
-        let mailing_lists =
-            lore_session::load_available_lists(config.mailing_lists_path()).unwrap_or_default();
+        let mailing_lists = lore_session::load_available_lists(
+            &config.string(StringConfig::MailingListsPath).await,
+        )
+        .unwrap_or_default();
 
-        let bookmarked_patchsets =
-            lore_session::load_bookmarked_patchsets(config.bookmarked_patchsets_path())
-                .unwrap_or_default();
+        let bookmarked_patchsets = lore_session::load_bookmarked_patchsets(
+            &config.string(StringConfig::BookmarkedPatchsetsPath).await,
+        )
+        .unwrap_or_default();
 
-        let reviewed_patchsets =
-            lore_session::load_reviewed_patchsets(config.reviewed_patchsets_path())
-                .unwrap_or_default();
+        let reviewed_patchsets = lore_session::load_reviewed_patchsets(
+            &config.string(StringConfig::ReviewedPatchsetsPath).await,
+        )
+        .unwrap_or_default();
 
         let lore_api_client = BlockingLoreAPIClient::default();
 
@@ -91,7 +96,7 @@ impl App {
                 target_list: String::new(),
                 possible_mailing_lists: mailing_lists,
                 highlighted_list_index: 0,
-                mailing_lists_path: config.mailing_lists_path().to_string(),
+                mailing_lists_path: config.string(StringConfig::MailingListsPath).await,
                 lore_api_client: lore_api_client.clone(),
             },
             latest_patchsets: None,
@@ -111,7 +116,7 @@ impl App {
 
     /// Initializes field [App::latest_patchsets], from currently selected
     /// mailing list in [App::mailing_list_selection].
-    pub fn init_latest_patchsets(&mut self) {
+    pub async fn init_latest_patchsets(&mut self) {
         // the target mailing list for "latest patchsets" is the highlighted
         // entry in the possible lists of "mailing list selection"
         let list_index = self.mailing_list_selection.highlighted_list_index;
@@ -120,7 +125,7 @@ impl App {
             .to_string();
         self.latest_patchsets = Some(LatestPatchsets::new(
             target_list,
-            self.config.page_size(),
+            self.config.usize(USizeConfig::PageSize).await,
             self.lore_api_client.clone(),
         ));
     }
@@ -164,7 +169,7 @@ impl App {
         let patchset_path: String = match self
             .logger
             .error_on_error(lore_session::download_patchset(
-                self.config.patchsets_cache_dir(),
+                &self.config.string(StringConfig::PatchsetsCacheDir).await,
                 &representative_patch,
             ))
             .await
@@ -214,7 +219,7 @@ impl App {
 
                     let rendered_cover = match self
                         .logger
-                        .error_on_error(render_cover(raw_cover, self.config.cover_renderer()))
+                        .error_on_error(render_cover(raw_cover, self.config.cover_renderer().await))
                         .await
                     {
                         Ok(render) => render,
@@ -225,7 +230,7 @@ impl App {
                         .logger
                         .error_on_error(render_patch_preview(
                             raw_patch,
-                            self.config.patch_renderer(),
+                            self.config.patch_renderer().await,
                         ))
                         .await
                     {
@@ -278,7 +283,7 @@ impl App {
     ///
     /// This function will panic if `details_actions` is
     /// `None`.
-    pub fn consolidate_patchset_actions(&mut self) -> color_eyre::Result<()> {
+    pub async fn consolidate_patchset_actions(&mut self) -> color_eyre::Result<()> {
         let details_actions = self.details_actions.as_ref().unwrap();
         let representative_patch = &details_actions.representative_patch;
         let actions = &details_actions.patchset_actions;
@@ -293,7 +298,10 @@ impl App {
 
         lore_session::save_bookmarked_patchsets(
             &self.bookmarked_patchsets.bookmarked_patchsets,
-            self.config.bookmarked_patchsets_path(),
+            &self
+                .config
+                .string(StringConfig::BookmarkedPatchsetsPath)
+                .await,
         )?;
 
         if let Some(true) = actions.get(&PatchsetAction::ReplyWithReviewedBy) {
@@ -303,7 +311,7 @@ impl App {
                 .unwrap_or_default();
             details_actions.reply_patchset_with_reviewed_by(
                 "all",
-                self.config.git_send_email_options(),
+                &self.config.string(StringConfig::GitSendEmailOptions).await,
                 &mut successful_indexes,
             )?;
             self.reviewed_patchsets.insert(
@@ -313,7 +321,10 @@ impl App {
 
             lore_session::save_reviewed_patchsets(
                 &self.reviewed_patchsets,
-                self.config.reviewed_patchsets_path(),
+                &self
+                    .config
+                    .string(StringConfig::ReviewedPatchsetsPath)
+                    .await,
             )?;
 
             self.details_actions
@@ -333,7 +344,8 @@ impl App {
                 .details_actions
                 .as_ref()
                 .unwrap()
-                .apply_patchset(&self.config)
+                .apply_patchset(self.config.clone())
+                .await
             {
                 Ok(msg) => InfoPopUp::generate_info_popup("Patchset Apply Success", &msg),
                 Err(msg) => InfoPopUp::generate_info_popup("Patchset Apply Fail", &msg),
@@ -348,8 +360,8 @@ impl App {
     }
 
     /// Initializes field [App::edit_config], using values from [App::config].
-    pub fn init_edit_config(&mut self) {
-        self.edit_config = Some(EditConfig::new(&self.config));
+    pub async fn init_edit_config(&mut self) {
+        self.edit_config = Some(EditConfig::new(self.config.clone()).await);
     }
 
     /// Sets field [App::edit_config] to `None`.
@@ -359,32 +371,44 @@ impl App {
 
     /// Based on the edited config values from [App::edit_config], commit them
     /// to field [App::config].
-    pub fn consolidate_edit_config(&mut self) {
+    pub async fn consolidate_edit_config(&mut self) {
         // TODO: Handle invalid values!
         if let Some(edit_config) = &mut self.edit_config {
             if let Ok(page_size) = edit_config.page_size() {
-                self.config.set_page_size(page_size)
+                self.config
+                    .set_usize(USizeConfig::PageSize, page_size)
+                    .await
             }
             if let Ok(cache_dir) = edit_config.cache_dir() {
-                self.config.set_cache_dir(cache_dir)
+                self.config
+                    .set_string(StringConfig::CacheDir, cache_dir)
+                    .await
             }
             if let Ok(data_dir) = edit_config.data_dir() {
-                self.config.set_data_dir(data_dir)
+                self.config
+                    .set_string(StringConfig::DataDir, data_dir)
+                    .await
             }
             if let Ok(git_send_email_option) = edit_config.git_send_email_option() {
-                self.config.set_git_send_email_option(git_send_email_option)
+                self.config
+                    .set_string(StringConfig::GitSendEmailOptions, git_send_email_option)
+                    .await
             }
             if let Ok(git_am_option) = edit_config.git_am_option() {
-                self.config.set_git_am_option(git_am_option)
+                self.config
+                    .set_string(StringConfig::GitAmOptions, git_am_option)
+                    .await
             }
             if let Ok(patch_renderer) = edit_config.extract_patch_renderer() {
-                self.config.set_patch_renderer(patch_renderer.into())
+                self.config.set_patch_renderer(patch_renderer.into()).await
             }
             if let Ok(cover_renderer) = edit_config.extract_cover_renderer() {
-                self.config.set_cover_renderer(cover_renderer.into())
+                self.config.set_cover_renderer(cover_renderer.into()).await
             }
             if let Ok(max_log_age) = edit_config.max_log_age() {
-                self.config.set_max_log_age(max_log_age)
+                self.config
+                    .set_usize(USizeConfig::MaxLogAge, max_log_age)
+                    .await
             }
         }
     }
@@ -414,7 +438,7 @@ impl App {
                 .await;
         }
 
-        match self.config.patch_renderer() {
+        match self.config.patch_renderer().await {
             PatchRenderer::Bat => {
                 if !utils::binary_exists("bat") {
                     self.logger

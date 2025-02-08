@@ -4,6 +4,7 @@ use crate::app::App;
 use actix::Actor;
 use clap::Parser;
 use cli::Cli;
+use config::{Config, ConfigActor, StringConfig};
 use handler::run_app;
 use logger::{LogLevel, Logger, LoggerActor};
 
@@ -12,6 +13,7 @@ mod cli;
 mod config;
 mod handler;
 mod logger;
+mod terminal;
 mod ui;
 mod utils;
 
@@ -19,12 +21,13 @@ mod utils;
 async fn main() -> color_eyre::Result<()> {
     let args = Cli::parse();
 
-    let logger = Logger::new("/tmp", LogLevel::Info)?.start();
+    let config = Config::build().start();
+    let logger = Logger::new(&config.string(StringConfig::LogsPath).await, LogLevel::Info)?.start();
     logger.collect_garbage(30).await;
 
     utils::install_hooks(logger.clone())?;
     let mut terminal = utils::init()?;
-    let mut app = App::new(logger.clone());
+    let mut app = App::new(logger.clone(), config.clone()).await;
 
     match args.resolve(logger.clone(), terminal, &mut app).await {
         ControlFlow::Break(b) => return b,
